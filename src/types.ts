@@ -1,3 +1,4 @@
+import type React from 'react';
 import type { ReactNode } from 'react';
 import type { TextStyle, ViewStyle } from 'react-native';
 
@@ -71,6 +72,15 @@ export type StepSimulation =
 /** Opaque — whatever your audio adapter's `play` accepts (a `require()`d asset, a URI…). */
 export type AudioSource = unknown;
 
+/**
+ * How steps are narrated:
+ * - `auto`  — play the step's `audio`; speak its text (TTS) when it has none or it fails
+ * - `audio` — audio files only, never TTS
+ * - `tts`   — always TTS, ignore audio files
+ * - `off`   — silent
+ */
+export type NarrationMode = 'auto' | 'audio' | 'tts' | 'off';
+
 export type BackdropPressAction = 'none' | 'next' | 'skip' | 'stop';
 
 export interface WalkthroughStep {
@@ -106,6 +116,13 @@ export interface WalkthroughStep {
 
   /** Played (through the provider's `audio` adapter) when the step appears. */
   audio?: AudioSource;
+  /**
+   * Text for TTS (through the provider's `speech` adapter). Defaults to the
+   * title + message; `false` never speaks this step.
+   */
+  speak?: string | false;
+  /** Overrides the provider's `narration` mode for this step. */
+  narration?: NarrationMode;
 
   showSkip?: boolean;
   showBack?: boolean;
@@ -117,7 +134,18 @@ export interface WalkthroughStep {
   /** Per-step theme override, deep-merged over the provider theme. */
   theme?: DeepPartial<WalkthroughTheme>;
 
-  /** Awaited before the target is measured — scroll it into view, open a drawer, etc. */
+  /**
+   * Scroll the target into view (with room for the tooltip) before
+   * spotlighting it. Default: the provider's `autoScroll` (on).
+   */
+  autoScroll?: boolean;
+  /**
+   * The scrollable to use for this step's target — overrides the one picked
+   * up from `WalkthroughScrollView` / `WalkthroughScrollContainer` / the
+   * target's `scrollRef`. Any ScrollView / FlatList / SectionList ref.
+   */
+  scrollRef?: React.RefObject<unknown>;
+  /** Awaited before the target is measured — open a drawer, `scrollToIndex` a list item into range, etc. */
   onBeforeEnter?: () => void | Promise<void>;
   onEnter?: () => void;
   onExit?: () => void;
@@ -222,12 +250,20 @@ export interface WalkthroughTheme {
   };
 }
 
+/**
+ * Every field optional, recursively — except style objects (ViewStyle /
+ * TextStyle), which are passed through as-is. Style objects are detected as
+ * types that a plain `ViewStyle` is assignable to; a theme group like
+ * `tooltip` has required fields, so it isn't mistaken for one.
+ */
 export type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends object
-    ? T[K] extends ViewStyle | TextStyle
-      ? T[K]
-      : DeepPartial<T[K]>
-    : T[K];
+  [K in keyof T]?: NonNullable<T[K]> extends (...args: never[]) => unknown
+    ? T[K]
+    : NonNullable<T[K]> extends object
+      ? ViewStyle extends NonNullable<T[K]>
+        ? T[K]
+        : DeepPartial<NonNullable<T[K]>>
+      : T[K];
 };
 
 export interface WalkthroughLabels {
@@ -244,7 +280,23 @@ export interface WalkthroughLabels {
 // ─── Adapters ────────────────────────────────────────────────────────────────
 
 export interface WalkthroughAudioAdapter {
+  /**
+   * Start playing `source`. Resolve once playback has started; reject (or
+   * throw) if it can't load or play — in `auto` narration that's what
+   * triggers the TTS fallback.
+   */
   play(source: AudioSource): void | Promise<void>;
+  stop(): void | Promise<void>;
+}
+
+export interface SpeechOptions {
+  /** BCP 47 language code, e.g. `en-US`, `ar-SA`, `ur-PK`. */
+  language?: string;
+}
+
+/** Text-to-speech, used for `tts` narration and as the `auto` fallback. */
+export interface WalkthroughSpeechAdapter {
+  speak(text: string, options?: SpeechOptions): void | Promise<void>;
   stop(): void | Promise<void>;
 }
 

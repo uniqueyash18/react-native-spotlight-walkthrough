@@ -3,6 +3,7 @@ import type { View } from 'react-native';
 import { defaultTheme } from './theme';
 import type {
   FinishReason,
+  NarrationMode,
   StartOptions,
   WalkthroughStep,
   WalkthroughTheme,
@@ -30,15 +31,23 @@ export interface WalkthroughContextValue {
   stepIndex: number;
   totalSteps: number;
 
+  /** The user's mute toggle (the tooltip's speaker button). */
   muted: boolean;
   setMuted: (muted: boolean) => void;
+  /** Current narration mode — starts from the provider's `narration` prop. */
+  narration: NarrationMode;
+  setNarration: (mode: NarrationMode) => void;
 
   hasSeen: (tourId: string) => Promise<boolean>;
   markSeen: (tourId: string) => Promise<void>;
   resetSeen: (tourId: string) => Promise<void>;
 
   /** @internal used by WalkthroughTarget */
-  registerTarget: (id: string, ref: React.RefObject<View | null>) => () => void;
+  registerTarget: (
+    id: string,
+    ref: React.RefObject<View | null>,
+    scrollChain?: readonly React.RefObject<unknown>[],
+  ) => () => void;
   /** @internal last finish reason, for tests / debugging */
   lastFinishReason: FinishReason | null;
 }

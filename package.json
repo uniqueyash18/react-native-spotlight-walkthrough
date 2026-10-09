@@ -1,7 +1,7 @@
 {
   "name": "react-native-spotlight-walkthrough",
   "version": "0.1.0",
-  "description": "Interactive spotlight walkthroughs for React Native: pass-through targets, animated gesture simulations, per-step audio, show-once persistence and a fully themeable UI.",
+  "description": "Interactive spotlight walkthroughs for React Native: pass-through targets, animated gesture simulations, audio/TTS narration, show-once persistence and a fully themeable UI.",
   "keywords": [
     "react-native",
     "walkthrough",
@@ -11,9 +11,20 @@
     "spotlight",
     "tooltip",
     "expo",
-    "reanimated"
+    "reanimated",
+    "tts",
+    "text-to-speech",
+    "narration"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uniqueyash18/react-native-spotlight-walkthrough.git"
+  },
+  "bugs": {
+    "url": "https://github.com/uniqueyash18/react-native-spotlight-walkthrough/issues"
+  },
+  "homepage": "https://github.com/uniqueyash18/react-native-spotlight-walkthrough#readme",
   "main": "lib/index.js",
   "module": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -29,6 +40,11 @@
       "types": "./lib/adapters/expo-audio.d.ts",
       "react-native": "./src/adapters/expo-audio.ts",
       "default": "./lib/adapters/expo-audio.js"
+    },
+    "./expo-speech": {
+      "types": "./lib/adapters/expo-speech.d.ts",
+      "react-native": "./src/adapters/expo-speech.ts",
+      "default": "./lib/adapters/expo-speech.js"
     },
     "./package.json": "./package.json"
   },
@@ -48,6 +64,7 @@
   },
   "peerDependencies": {
     "expo-audio": "*",
+    "expo-speech": "*",
     "react": ">=18",
     "react-native": ">=0.74",
     "react-native-reanimated": ">=3.6",
@@ -57,11 +74,16 @@
   "peerDependenciesMeta": {
     "expo-audio": {
       "optional": true
+    },
+    "expo-speech": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@types/react": "~19.2.0",
     "expo-audio": "~57.0.5",
+    "expo-modules-core": "~57.0.21",
+    "expo-speech": "~57.0.3",
     "react": "19.2.3",
     "react-native": "0.85.3",
     "react-native-reanimated": "4.3.1",

@@ -175,3 +175,57 @@ export function computeBlockers(hole: Hole, container: Size): Rect[] {
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
+
+// ─── Scroll into view ────────────────────────────────────────────────────────
+
+export interface ScrollAxisInput {
+  /** Target position along the axis, in the scroll content's coordinates. */
+  targetStart: number;
+  targetSize: number;
+  /** The scroll viewport's position along the axis, in window coordinates. */
+  viewportStart: number;
+  viewportSize: number;
+  /** What's actually visible along the axis (viewport ∩ safe area), in window coordinates. */
+  visibleStart: number;
+  visibleEnd: number;
+  /** Current scroll offset and total content size. */
+  offset: number;
+  contentSize: number;
+  /** Space to keep between the target and the visible edge. */
+  margin: number;
+  /** Room the tooltip needs beside the target (0 for the horizontal axis). */
+  reserve: number;
+}
+
+/**
+ * New scroll offset that brings the target into view with room for the
+ * tooltip, or `null` when it's already fine. Targets that fit with a
+ * tooltip-sized gap on both sides are centred; taller ones are top-aligned
+ * so the tooltip goes below. Never scrolls past either end of the content.
+ */
+export function computeScrollOffset(input: ScrollAxisInput): number | null {
+  const { targetStart, targetSize, viewportStart, viewportSize, offset, contentSize, margin, reserve } =
+    input;
+  const visStart = offset + (input.visibleStart - viewportStart);
+  const visEnd = offset + (input.visibleEnd - viewportStart);
+  const visSize = visEnd - visStart;
+  if (visSize <= 0) return null;
+  const targetEnd = targetStart + targetSize;
+
+  const outOfView = targetStart < visStart + margin || targetEnd > visEnd - margin;
+  const roomBefore = targetStart - visStart;
+  const roomAfter = visEnd - targetEnd;
+  const couldFitTooltip = targetSize + reserve + margin * 2 <= visSize;
+  const noTooltipRoom = reserve > 0 && Math.max(roomBefore, roomAfter) < reserve && couldFitTooltip;
+  if (!outOfView && !noTooltipRoom) return null;
+
+  let newVisStart: number;
+  if (targetSize + reserve * 2 + margin * 2 <= visSize) {
+    newVisStart = targetStart - (visSize - targetSize) / 2;
+  } else {
+    newVisStart = targetStart - margin;
+  }
+  const maxOffset = Math.max(0, contentSize - viewportSize);
+  const next = clamp(offset + (newVisStart - visStart), 0, maxOffset);
+  return Math.abs(next - offset) > 1 ? next : null;
+}

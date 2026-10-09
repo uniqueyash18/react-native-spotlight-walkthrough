@@ -48,6 +48,8 @@ export interface SpotlightOverlayProps {
   target: Rect | null;
   /** True once the current step's target has been resolved (or it has none). */
   ready: boolean;
+  /** The content under the overlay is being scrolled — shrink the hole away until it settles. */
+  collapsed?: boolean;
   theme: WalkthroughTheme;
   insets: Insets;
   tooltipProps: Omit<TooltipRenderProps, 'theme' | 'step'>;
@@ -64,6 +66,7 @@ export function SpotlightOverlay({
   step,
   target,
   ready,
+  collapsed = false,
   theme,
   insets,
   tooltipProps,
@@ -98,8 +101,22 @@ export function SpotlightOverlay({
   const hr = useSharedValue(0);
   const hasHole = useRef(false);
 
+  // Collapse the hole to a point while the content scrolls under it; the next
+  // placement then grows out of that point at the target's new position.
   useEffect(() => {
-    if (!hole || !ready) return;
+    if (!collapsed || !hasHole.current) return;
+    const duration = Math.min(theme.spotlight.transitionDuration, 200);
+    const timing = (v: number) => withTiming(v, { duration, easing: Easing.out(Easing.cubic) });
+    hx.value = timing(hx.value + hw.value / 2);
+    hy.value = timing(hy.value + hh.value / 2);
+    hw.value = timing(0);
+    hh.value = timing(0);
+    hr.value = timing(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed]);
+
+  useEffect(() => {
+    if (!hole || !ready || collapsed) return;
     const values: [typeof hx, number][] = [
       [hx, hole.x],
       [hy, hole.y],
@@ -115,9 +132,10 @@ export function SpotlightOverlay({
         ? withTiming(value, { duration, easing: Easing.out(Easing.cubic) })
         : value;
     }
-    hasHole.current = hole.width > 0;
+    // Stays true through a collapse, so the reopening morphs instead of jumping.
+    hasHole.current = hasHole.current || hole.width > 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hole?.x, hole?.y, hole?.width, hole?.height, hole?.radius, ready]);
+  }, [hole?.x, hole?.y, hole?.width, hole?.height, hole?.radius, ready, collapsed]);
 
   const pulse = useSharedValue(1);
   const { ring } = theme.spotlight;

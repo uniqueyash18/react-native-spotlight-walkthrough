@@ -4,7 +4,7 @@ Interactive spotlight walkthroughs for React Native.
 
 - **Interactive steps.** The spotlight hole can pass touches through, so users try the real gesture instead of only reading about it. Your code moves the tour forward when they do.
 - **Gesture simulations.** An animated hand demonstrates tap, double tap, long press, swipe or pinch on the target. You can also build your own from the same primitives.
-- **Per-step audio.** Each step can play a voice-over through a pluggable adapter. An `expo-audio` adapter is included, and the tooltip has a mute toggle.
+- **Narration: audio files or TTS.** Each step can play a voice-over file, or have its text read out by text-to-speech. In the default `auto` mode, TTS takes over when a step has no file or the file fails. Adapters for `expo-audio` and `expo-speech` are included, and the tooltip has a mute toggle.
 - **Show once.** A tour can remember it has been seen, using any storage (AsyncStorage, MMKV, expo-secure-store and so on).
 - **Fully themeable.** You can change the overlay colour and opacity, the hole shape (`rect`, `pill`, `circle`, `none`), padding, radius, ring, pulse and morph timing. The tooltip, text, buttons, progress dots, arrow, hand and ripple are all themeable. You can override the theme per step, or replace the tooltip or hand completely.
 - **Built with** Reanimated and react-native-svg. It works in RTL layouts and respects safe areas.
@@ -15,8 +15,8 @@ Interactive spotlight walkthroughs for React Native.
 npm install react-native-spotlight-walkthrough
 # peer dependencies (most apps already have them)
 npm install react-native-reanimated react-native-svg react-native-safe-area-context
-# optional, for step audio
-npx expo install expo-audio
+# optional, for narration
+npx expo install expo-audio expo-speech
 ```
 
 ## Quick start
@@ -89,6 +89,44 @@ function HomeScreen() {
 ```
 
 `useWalkthroughTarget(id)` returns a ref instead, so you can attach it to an existing `View` without adding a wrapper. Remember to set `collapsable={false}` on that view.
+
+## Scrolling targets into view
+
+If a target is off screen, or there's no room beside it for the tooltip, the tour scrolls it into view first. A target that fits is centred; a taller one is aligned to the top, with the tooltip below it. Scrolling never goes past either end of the content. The tour then waits until the target has stopped moving before drawing the spotlight.
+
+To enable this, the tour needs to know which scroll view the target is in. Swap `ScrollView` for the drop-in `WalkthroughScrollView`:
+
+```tsx
+import { WalkthroughScrollView, WalkthroughTarget } from 'react-native-spotlight-walkthrough';
+
+<WalkthroughScrollView contentContainerStyle={styles.content}>
+  …
+  <WalkthroughTarget id="checkout">
+    <CheckoutButton />
+  </WalkthroughTarget>
+</WalkthroughScrollView>
+```
+
+**Nested scroll views.** These work too. A chip in a horizontal `WalkthroughScrollView` inside a vertical one scrolls sideways and vertically.
+
+**Other scrollables.** For a FlatList, a SectionList or an animated scroll view, wrap it in `WalkthroughScrollContainer`, or pass `scrollRef` on the target or the step:
+
+```tsx
+const listRef = useRef<FlatList>(null);
+
+<WalkthroughScrollContainer scrollRef={listRef}>
+  <FlatList ref={listRef} … />
+</WalkthroughScrollContainer>
+
+// or: <WalkthroughTarget id="row-3" scrollRef={listRef}>
+// or: { id: 'row', target: 'row-3', scrollRef: listRef }
+```
+
+A FlatList only renders items near the viewport, so a target in an item that hasn't rendered yet can't be found. Bring it into range in the step's `onBeforeEnter`, for example with `listRef.current?.scrollToIndex({ index: 40 })`.
+
+**Layout changes.** The spotlight follows its target when the layout changes during a step. That covers content above it growing (images, async data, an expanding section), the scroll content changing size, and the user scrolling it. These re-measures never scroll on their own, so the tour doesn't fight the user. If something moves that the tour can't see, call `refresh()`.
+
+**Tuning.** The provider props are `autoScroll` (default `true`), `scrollMargin` (16), `tooltipReserve` (180, the room kept for the tooltip) and `scrollSettleMs` (1200, the longest to wait for the target to stop moving). A step can turn scrolling off with `autoScroll: false`.
 
 ## Interactive steps
 
@@ -197,30 +235,65 @@ To replace the hand everywhere (with an icon font glyph, an image or a Lottie an
 
 The fingertip is expected near the top of the glyph, about 46% across.
 
-## Audio
+## Narration: audio and TTS
 
 ```tsx
 import { createExpoAudioAdapter } from 'react-native-spotlight-walkthrough/expo-audio';
+import { createExpoSpeechAdapter } from 'react-native-spotlight-walkthrough/expo-speech';
 
-const audio = createExpoAudioAdapter({ volume: 1, playsInSilentMode: true });
+const audio = createExpoAudioAdapter();
+const speech = createExpoSpeechAdapter({ rate: 0.95 });
 
-<WalkthroughProvider audio={audio}>
-
-// per step
-{ id: 'intro', title: 'Welcome', audio: require('./assets/walkthrough/intro.m4a') }
-{ id: 'remote', title: 'Map', audio: { uri: 'https://cdn.example.com/map.m4a' } }
+<WalkthroughProvider
+  audio={audio}
+  speech={speech}
+  speechLanguage={i18n.language}   // e.g. 'en-US', 'ar-SA', 'ur-PK'
+  narration="auto"                 // 'auto' | 'audio' | 'tts' | 'off'
+  onAudioError={(error, step) => log('voice-over failed', step.id, error)}
+>
 ```
 
-Audio starts when a step appears and stops when the step changes or the tour ends. While a step has audio, the tooltip shows a mute toggle. Hide it with `theme.audio.showMuteButton: false`. To control muting yourself, use `useWalkthrough().muted` and `setMuted`.
+The `narration` setting decides how each step is narrated:
 
-To use any other player, implement `{ play(source), stop() }`:
+| `narration` | A step with an `audio` file | A step without one |
+| --- | --- | --- |
+| `'auto'` (default) | Plays the file. If it fails to load or play, speaks the step's text | Speaks the text |
+| `'audio'` | Plays the file | Silent |
+| `'tts'` | Speaks the text and ignores the file | Speaks the text |
+| `'off'` | Silent | Silent |
+
+- **What TTS reads.** By default it reads the step's `title` followed by its `message`. Set `speak: 'Custom line'` to read something else, or `speak: false` to never speak that step. That also turns off its fallback.
+- **Per step.** A step's `narration` field overrides the provider's mode for that step.
+- **At runtime.** `useWalkthrough().setNarration('tts')` switches the mode, for example from a settings toggle. Passing a new value to the `narration` prop resets it.
+- **Mute.** The tooltip's speaker button is the user's own on/off switch, and it works in every mode. It appears only on steps that would make a sound. Hide it with `theme.audio.showMuteButton: false`, or control it with `muted` / `setMuted`. Muting or switching mode mid-step takes effect immediately.
+- **Timing.** Narration starts when a step appears and stops when the step changes or the tour ends.
+
+```tsx
+{ id: 'intro',  title: 'Welcome', audio: require('./assets/walkthrough/intro.m4a') }
+{ id: 'map',    title: 'Map',     audio: { uri: 'https://cdn.example.com/map.m4a' } }
+{ id: 'search', title: 'Search',  message: 'Find parts by name.' }            // TTS
+{ id: 'cart',   title: 'Cart',    speak: 'Everything you add shows up here.' } // TTS, custom line
+```
+
+### Adapter contracts
+
+To use another player (react-native-track-player, react-native-sound) or TTS engine, implement these interfaces:
 
 ```ts
 const audio: WalkthroughAudioAdapter = {
-  play: (source) => TrackPlayer.load(source).then(() => TrackPlayer.play()),
+  // Resolve once playback has started. Reject if it can't load or play,
+  // because in 'auto' mode a rejection is what triggers the TTS fallback.
+  play: async (source) => { await TrackPlayer.load(source); await TrackPlayer.play(); },
   stop: () => TrackPlayer.pause(),
 };
+
+const speech: WalkthroughSpeechAdapter = {
+  speak: (text, { language } = {}) => Tts.speak(text, { language }),
+  stop: () => Tts.stop(),
+};
 ```
+
+The bundled `expo-audio` adapter treats a clip that hasn't started within `startTimeoutMs` (default 5000) as failed. Dead URLs often never report an error, so this timeout is what catches them.
 
 ## Show once
 
@@ -325,7 +398,11 @@ Use `step.content` to add something inside the default tooltip. A mock of the sh
 | `theme` | `DeepPartial<WalkthroughTheme>` | `defaultTheme` | See Theming |
 | `labels` | `Partial<WalkthroughLabels>` | English | Button and counter text |
 | `audio` | `WalkthroughAudioAdapter` | none | Plays `step.audio` |
+| `speech` | `WalkthroughSpeechAdapter` | none | Text-to-speech |
+| `speechLanguage` | `string` | none | Language passed to `speech.speak` |
+| `narration` | `'auto' \| 'audio' \| 'tts' \| 'off'` | `'auto'` | See Narration |
 | `initiallyMuted` | `boolean` | `false` | |
+| `onAudioError` | `(error, step) => void` | none | An audio file failed (called before the TTS fallback) |
 | `storage` | `WalkthroughStorage` | none | Needed for `showOnce` |
 | `storageKeyPrefix` | `string` | `'walkthrough_seen_'` | |
 | `renderTooltip` | `(props) => ReactNode` | `DefaultTooltip` | |
@@ -334,6 +411,10 @@ Use `step.content` to add something inside the default tooltip. A mock of the sh
 | `insets` | `Insets` | from safe-area-context | |
 | `androidBack` | `'skip' \| 'back' \| 'stop' \| 'none'` | `'skip'` | Hardware back button |
 | `measureTimeout` | `number` (ms) | `2000` | How long to retry a target that isn't mounted yet |
+| `autoScroll` | `boolean` | `true` | Scroll targets into view before spotlighting them |
+| `scrollMargin` | `number` | `16` | Gap kept between a scrolled-to target and the edge |
+| `tooltipReserve` | `number` | `180` | Room kept beside a scrolled-to target for the tooltip |
+| `scrollSettleMs` | `number` (ms) | `1200` | Longest to wait for the target to stop moving after a scroll |
 | `onStart` / `onStepChange` / `onFinish` | callbacks | | `onFinish(tourId, 'completed' \| 'skipped' \| 'stopped')` |
 
 ### `WalkthroughStep`
@@ -350,19 +431,23 @@ Use `step.content` to add something inside the default tooltip. A mock of the sh
 | `interactive` | `boolean` | Touches inside the hole reach the real UI |
 | `simulation` | `StepSimulation` | |
 | `audio` | any | Passed to `audio.play` |
+| `speak` | `string \| false` | Text for TTS. Defaults to title + message. `false` means never speak this step |
+| `narration` | `NarrationMode` | Overrides the provider's mode for this step |
 | `showSkip`, `showBack`, `showNext`, `nextLabel` | | Skip is shown on every step except the last by default. Back is hidden by default |
 | `backdropPress` | `'none' \| 'next' \| 'skip' \| 'stop'` | What a tap on the dimmed area does. Default `none` |
 | `theme` | `DeepPartial<WalkthroughTheme>` | Theme override for this step |
-| `onBeforeEnter` | `() => void \| Promise<void>` | Awaited before the target is measured. Use it to scroll the target into view |
+| `autoScroll` | `boolean` | Set `false` to skip scrolling for this step |
+| `scrollRef` | `RefObject` | The scroll view to use for this step's target |
+| `onBeforeEnter` | `() => void \| Promise<void>` | Awaited before the target is measured. Use it to open a drawer or bring a FlatList row into range |
 | `onEnter`, `onExit` | `() => void` | |
 
 ### `useWalkthrough()`
 
-`start(tour, { force?, startAt?, delay? })`, `next()`, `back()`, `goTo(idOrIndex)`, `skip()`, `stop()`, `updateStep(id, patch)`, `refresh()` (re-measures the target), `isActive`, `tourId`, `currentStep`, `stepIndex`, `totalSteps`, `muted`, `setMuted`, `hasSeen`, `markSeen`, `resetSeen`.
+`start(tour, { force?, startAt?, delay? })`, `next()`, `back()`, `goTo(idOrIndex)`, `skip()`, `stop()`, `updateStep(id, patch)`, `refresh()` (re-measures the target), `isActive`, `tourId`, `currentStep`, `stepIndex`, `totalSteps`, `muted`, `setMuted`, `narration`, `setNarration`, `hasSeen`, `markSeen`, `resetSeen`.
 
 ## Notes
 
-- **Measuring targets.** Targets are measured with `measureInWindow`. If a target is inside a `ScrollView`, scroll it into view in `onBeforeEnter`. You can also turn scrolling off while the tour runs (`scrollEnabled={!isActive}`). Call `refresh()` after a layout change the library can't see.
+- **Measuring targets.** Targets are measured with `measureInWindow`. For targets in scroll views, see "Scrolling targets into view". Use `refresh()` after a layout change the library can't see.
 - **Where the overlay is drawn.** It is drawn above the provider's children. Native modals (`<Modal>`, native-stack modal presentations) are drawn above it. For a tour inside those, either wrap the modal's content in its own `WalkthroughProvider` or use `overlayHost="modal"`.
 - **Non-rectangular holes.** For `circle` and `pill` holes, touches only pass through within the hole's bounding box.
 - **WebViews.** WebViews and other native views work as interactive targets, because the hole has no view over it.

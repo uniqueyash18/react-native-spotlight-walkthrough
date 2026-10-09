@@ -1,6 +1,11 @@
 export { WalkthroughProvider, type WalkthroughProviderProps } from './WalkthroughProvider';
 export { WalkthroughTarget, useWalkthroughTarget, type WalkthroughTargetProps } from './WalkthroughTarget';
 export {
+  WalkthroughScrollView,
+  WalkthroughScrollContainer,
+  type WalkthroughScrollContainerProps,
+} from './WalkthroughScrollView';
+export {
   useWalkthrough,
   useWalkthroughTheme,
   type WalkthroughContextValue,
@@ -8,6 +13,7 @@ export {
 
 export { DefaultTooltip } from './overlay/DefaultTooltip';
 export { defaultTheme, defaultLabels, mergeTheme, withAlpha } from './theme';
+export { planNarration, speechTextFor, type NarrationPlan } from './narration';
 
 // Simulation building blocks + presets, for custom gesture animations.
 export {
@@ -37,6 +43,9 @@ export type {
   SimulationRenderContext,
   StepSimulation,
   AudioSource,
+  NarrationMode,
+  SpeechOptions,
+  WalkthroughSpeechAdapter,
   BackdropPressAction,
   WalkthroughStep,
   WalkthroughTour,

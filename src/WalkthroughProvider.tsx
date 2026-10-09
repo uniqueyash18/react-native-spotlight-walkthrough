@@ -11,8 +11,10 @@ import React, {
 import { BackHandler, Dimensions, Modal, type View } from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { WalkthroughContext, type WalkthroughContextValue } from './context';
+import { planNarration } from './narration';
 import { SpotlightOverlay } from './overlay/SpotlightOverlay';
 import { HandRendererContext, DefaultHand } from './simulation/primitives';
+import { scrollTargetIntoView } from './scroll';
 import { defaultLabels, defaultTheme, mergeTheme } from './theme';
 import {
   initialTourState,
@@ -26,11 +28,13 @@ import type {
   FinishReason,
   HandRenderProps,
   Insets,
+  NarrationMode,
   Rect,
   StartOptions,
   TooltipRenderProps,
   WalkthroughAudioAdapter,
   WalkthroughLabels,
+  WalkthroughSpeechAdapter,
   WalkthroughStep,
   WalkthroughStorage,
   WalkthroughTheme,
@@ -46,8 +50,21 @@ export interface WalkthroughProviderProps {
 
   /** Plays each step's `audio`. See `react-native-spotlight-walkthrough/expo-audio`. */
   audio?: WalkthroughAudioAdapter;
+  /** Text-to-speech. See `react-native-spotlight-walkthrough/expo-speech`. */
+  speech?: WalkthroughSpeechAdapter;
+  /** Language passed to `speech.speak`, e.g. `en-US` / `ar-SA`. */
+  speechLanguage?: string;
+  /**
+   * `auto` (default) — audio file, TTS when a step has none or it fails ·
+   * `audio` — files only · `tts` — always TTS · `off` — silent.
+   * Steps can override it with `step.narration`; change it at runtime with
+   * `useWalkthrough().setNarration`. A new value of this prop also resets it.
+   */
+  narration?: NarrationMode;
   /** Start muted. The user can toggle it from the tooltip (theme.audio.showMuteButton). */
   initiallyMuted?: boolean;
+  /** An audio file failed — called before falling back to TTS (in `auto`). */
+  onAudioError?: (error: unknown, step: WalkthroughStep) => void;
 
   /** Where `showOnce` tours remember they've been seen. */
   storage?: WalkthroughStorage;
@@ -72,6 +89,20 @@ export interface WalkthroughProviderProps {
   androidBack?: 'skip' | 'back' | 'stop' | 'none';
   /** How long to keep retrying a target that isn't mounted / measurable yet, ms. Default 2000. */
   measureTimeout?: number;
+  /**
+   * Scroll each target into view (inside its WalkthroughScrollView /
+   * WalkthroughScrollContainer / scrollRef) before spotlighting it. Default true.
+   */
+  autoScroll?: boolean;
+  /** Gap kept between a scrolled-to target and the visible edge. Default 16. */
+  scrollMargin?: number;
+  /** Room kept beside a scrolled-to target for the tooltip. Default 180. */
+  tooltipReserve?: number;
+  /**
+   * After scrolling, the target is re-measured until it stops moving; this
+   * caps how long that waits, ms. Default 1200.
+   */
+  scrollSettleMs?: number;
 
   onStart?: (tourId: string) => void;
   onStepChange?: (step: WalkthroughStep, index: number, tourId: string) => void;
@@ -80,13 +111,24 @@ export interface WalkthroughProviderProps {
 
 const ZERO_INSETS: Insets = { top: 0, bottom: 0, left: 0, right: 0 };
 const MEASURE_RETRY_MS = 100;
+const SETTLE_POLL_MS = 80;
+
+const sameRect = (a: Rect, b: Rect) =>
+  Math.abs(a.x - b.x) < 0.5 &&
+  Math.abs(a.y - b.y) < 0.5 &&
+  Math.abs(a.width - b.width) < 0.5 &&
+  Math.abs(a.height - b.height) < 0.5;
 
 export function WalkthroughProvider({
   children,
   theme: themeOverride,
   labels: labelsOverride,
   audio,
+  speech,
+  speechLanguage,
+  narration: narrationProp = 'auto',
   initiallyMuted = false,
+  onAudioError,
   storage,
   storageKeyPrefix = 'walkthrough_seen_',
   renderTooltip,
@@ -95,6 +137,10 @@ export function WalkthroughProvider({
   insets: insetsOverride,
   androidBack = 'skip',
   measureTimeout = 2000,
+  autoScroll = true,
+  scrollMargin = 16,
+  tooltipReserve = 180,
+  scrollSettleMs = 1200,
   onStart,
   onStepChange,
   onFinish,
@@ -104,18 +150,35 @@ export function WalkthroughProvider({
   stateRef.current = state;
 
   const [muted, setMuted] = useState(initiallyMuted);
+  const [narration, setNarration] = useState<NarrationMode>(narrationProp);
+  useEffect(() => setNarration(narrationProp), [narrationProp]);
   const [target, setTarget] = useState<Rect | null>(null);
   const [ready, setReady] = useState(false);
+  const [scrolling, setScrolling] = useState(false);
   const [measureTick, setMeasureTick] = useState(0);
   const [lastFinishReason, setLastFinishReason] = useState<FinishReason | null>(null);
 
-  const targets = useRef(new Map<string, React.RefObject<View | null>>());
+  const targets = useRef(
+    new Map<
+      string,
+      { ref: React.RefObject<View | null>; scrollChain: readonly React.RefObject<unknown>[] }
+    >(),
+  );
+  // True while a step's target is being resolved. A refresh requested then
+  // (e.g. the scroll-end event from our own scrollTo, or content shifting) is
+  // queued and runs once the measurement finishes, rather than restarting it.
+  const measuring = useRef(false);
+  const refreshQueued = useRef(false);
   const safeAreaInsets = useContext(SafeAreaInsetsContext);
   const insets = insetsOverride ?? safeAreaInsets ?? ZERO_INSETS;
 
   // Latest callbacks / adapters without re-running effects when they change identity.
-  const latest = useRef({ onStart, onStepChange, onFinish, audio, storage, muted });
-  latest.current = { onStart, onStepChange, onFinish, audio, storage, muted };
+  const latest = useRef({
+    onStart, onStepChange, onFinish, onAudioError, audio, speech, speechLanguage, storage, muted, narration,
+  });
+  latest.current = {
+    onStart, onStepChange, onFinish, onAudioError, audio, speech, speechLanguage, storage, muted, narration,
+  };
 
   const baseTheme = useMemo(() => mergeTheme(defaultTheme, themeOverride), [themeOverride]);
   const labels = useMemo(() => ({ ...defaultLabels, ...labelsOverride }), [labelsOverride]);
@@ -169,13 +232,60 @@ export function WalkthroughProvider({
 
   // ── Audio ──────────────────────────────────────────────────────────────────
 
+  // Bumped whenever narration stops or restarts, so a late audio failure from
+  // a previous step can't start TTS over the current one.
+  const narrationGen = useRef(0);
+
   const stopAudio = useCallback(() => {
-    try {
-      void latest.current.audio?.stop();
-    } catch {
-      // ignore adapter failures
+    narrationGen.current++;
+    const { audio: a, speech: sp } = latest.current;
+    for (const stopFn of [() => a?.stop(), () => sp?.stop()]) {
+      try {
+        void Promise.resolve(stopFn()).catch(() => {});
+      } catch {
+        // ignore adapter failures
+      }
     }
   }, []);
+
+  const narrate = useCallback(
+    (forStep: WalkthroughStep) => {
+      stopAudio();
+      const gen = narrationGen.current;
+      const { audio: a, speech: sp, speechLanguage: language } = latest.current;
+      const plan = planNarration(forStep, {
+        mode: latest.current.narration,
+        muted: latest.current.muted,
+        hasAudioAdapter: !!a,
+        hasSpeechAdapter: !!sp,
+      });
+
+      const speak = () => {
+        if (gen !== narrationGen.current || !plan.text || !sp) return;
+        try {
+          void Promise.resolve(sp.speak(plan.text, { language })).catch(() => {});
+        } catch {
+          // ignore adapter failures
+        }
+      };
+
+      if (plan.primary === 'speech') {
+        speak();
+      } else if (plan.primary === 'audio' && a) {
+        const onFail = (error: unknown) => {
+          if (gen !== narrationGen.current) return;
+          latest.current.onAudioError?.(error, forStep);
+          if (plan.fallbackToSpeech) speak();
+        };
+        try {
+          void Promise.resolve(a.play(forStep.audio)).catch(onFail);
+        } catch (error) {
+          onFail(error);
+        }
+      }
+    },
+    [stopAudio],
+  );
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -259,14 +369,21 @@ export function WalkthroughProvider({
     (id: string, patch: Partial<WalkthroughStep>) => dispatch({ type: 'updateStep', id, patch }),
     [],
   );
-  const refresh = useCallback(() => setMeasureTick((n) => n + 1), []);
-
-  const registerTarget = useCallback((id: string, ref: React.RefObject<View | null>) => {
-    targets.current.set(id, ref);
-    return () => {
-      if (targets.current.get(id) === ref) targets.current.delete(id);
-    };
+  const refresh = useCallback(() => {
+    if (measuring.current) refreshQueued.current = true;
+    else setMeasureTick((n) => n + 1);
   }, []);
+
+  const registerTarget = useCallback(
+    (id: string, ref: React.RefObject<View | null>, scrollChain: readonly React.RefObject<unknown>[] = []) => {
+      const entry = { ref, scrollChain };
+      targets.current.set(id, entry);
+      return () => {
+        if (targets.current.get(id) === entry) targets.current.delete(id);
+      };
+    },
+    [],
+  );
 
   // ── Per-step: onBeforeEnter → measure → onEnter + audio ────────────────────
 
@@ -289,13 +406,59 @@ export function WalkthroughProvider({
       if (!t) return Promise.resolve(null);
       if (typeof t === 'function') return Promise.resolve(t()).catch(() => null);
       if (typeof t === 'object') return Promise.resolve(t);
-      const ref = targets.current.get(t);
-      if (!ref?.current) return Promise.resolve(null);
+      const view = targets.current.get(t)?.ref.current;
+      if (!view) return Promise.resolve(null);
       return new Promise((resolve) => {
-        ref.current!.measureInWindow((x, y, width, height) =>
+        view.measureInWindow((x, y, width, height) =>
           resolve(width > 0 && height > 0 ? { x, y, width, height } : null),
         );
       });
+    };
+
+    // Scrolls a registered target into view through each enclosing scroll
+    // container, innermost first; resolves true if anything moved.
+    const scrollIntoView = async (): Promise<boolean> => {
+      if (!(step.autoScroll ?? autoScroll) || typeof step.target !== 'string') return false;
+      const entry = targets.current.get(step.target);
+      const view = entry?.ref.current;
+      if (!entry || !view) return false;
+      const chain = step.scrollRef
+        ? [step.scrollRef, ...entry.scrollChain.filter((c) => c !== step.scrollRef)]
+        : entry.scrollChain;
+      let moved = false;
+      for (const container of chain) {
+        if (!container.current) continue;
+        try {
+          const didScroll = await scrollTargetIntoView(view, container.current, {
+            insets,
+            margin: scrollMargin,
+            tooltipReserve,
+          });
+          moved = moved || didScroll;
+        } catch {
+          // an unusable container shouldn't stop the outer ones
+        }
+      }
+      return moved;
+    };
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => {
+        retryTimer = setTimeout(resolve, ms);
+      });
+    // Scroll animations differ by platform and distance — poll until two
+    // consecutive measurements agree instead of trusting a fixed delay.
+    const measureWhenSettled = async (fallback: Rect): Promise<Rect | null> => {
+      const deadline = Date.now() + scrollSettleMs;
+      let previous: Rect | null = null;
+      await wait(SETTLE_POLL_MS);
+      while (!cancelled) {
+        const current = await measureOnce();
+        if (current && previous && sameRect(current, previous)) return current;
+        if (Date.now() >= deadline) return current ?? fallback;
+        previous = current;
+        await wait(SETTLE_POLL_MS);
+      }
+      return null;
     };
 
     const run = async () => {
@@ -307,13 +470,32 @@ export function WalkthroughProvider({
         }
       }
       const deadline = Date.now() + measureTimeout;
+      let scrolls = 0;
       const attempt = async () => {
         if (cancelled) return;
-        const rect = await measureOnce();
+        let rect = await measureOnce();
         if (cancelled) return;
         if (!rect && step.target && Date.now() < deadline) {
           retryTimer = setTimeout(attempt, MEASURE_RETRY_MS);
           return;
+        }
+        // Bring it on screen first, then measure where it settled. A second
+        // pass catches layouts that shift while scrolling (sticky headers…).
+        // Refreshes (user scrolled, layout shifted) only re-measure — they
+        // never scroll, so the tour doesn't fight the user.
+        while (!isRefresh && rect && scrolls < 2 && (await scrollIntoView())) {
+          if (scrolls === 0) setScrolling(true);
+          scrolls++;
+          rect = (await measureWhenSettled(rect)) ?? rect;
+          if (cancelled) return;
+        }
+        measuring.current = false;
+        if (scrolls > 0) setScrolling(false);
+        if (refreshQueued.current) {
+          refreshQueued.current = false;
+          // Re-measure once more after this one lands (measuredStepKey is set
+          // below, so it runs as a refresh: no onEnter / narration replay).
+          setTimeout(() => setMeasureTick((n) => n + 1), 0);
         }
         if (!rect && step.target && __DEV__) {
           console.warn(
@@ -326,21 +508,21 @@ export function WalkthroughProvider({
         measuredStepKey.current = stepKey;
         step.onEnter?.();
         latest.current.onStepChange?.(step, index, tour.id);
-        if (step.audio != null && !latest.current.muted) {
-          try {
-            void latest.current.audio?.play(step.audio);
-          } catch {
-            // ignore adapter failures
-          }
-        }
+        narrate(step);
       };
       void attempt();
     };
 
-    if (!isRefresh) setReady(false);
+    if (!isRefresh) {
+      setReady(false);
+      refreshQueued.current = false;
+    }
+    measuring.current = true;
     void run();
     return () => {
       cancelled = true;
+      measuring.current = false;
+      setScrolling(false);
       if (retryTimer) clearTimeout(retryTimer);
       if (!isRefresh) stopAudio();
     };
@@ -354,10 +536,18 @@ export function WalkthroughProvider({
     return () => sub.remove();
   }, [refresh]);
 
-  // Muting mid-step silences it immediately.
+  // Muting or switching mode mid-step takes effect immediately: silence, or
+  // restart the current step's narration in the new mode.
+  const narrationKey = `${muted}:${narration}`;
+  const lastNarrationKey = useRef(narrationKey);
   useEffect(() => {
-    if (muted) stopAudio();
-  }, [muted, stopAudio]);
+    if (lastNarrationKey.current === narrationKey) return;
+    lastNarrationKey.current = narrationKey;
+    const current = stateRef.current;
+    const currentStep = current.tour?.steps[current.index];
+    if (currentStep && ready) narrate(currentStep);
+    else stopAudio();
+  }, [narrationKey, ready, narrate, stopAudio]);
 
   // Android hardware back.
   useEffect(() => {
@@ -399,13 +589,15 @@ export function WalkthroughProvider({
       totalSteps: tour?.steps.length ?? 0,
       muted,
       setMuted,
+      narration,
+      setNarration,
       hasSeen,
       markSeen,
       resetSeen,
       registerTarget,
       lastFinishReason,
     }),
-    [start, next, back, goTo, skip, stop, updateStep, refresh, tour, step, index, muted, hasSeen, markSeen, resetSeen, registerTarget, lastFinishReason],
+    [start, next, back, goTo, skip, stop, updateStep, refresh, tour, step, index, muted, narration, hasSeen, markSeen, resetSeen, registerTarget, lastFinishReason],
   );
 
   const handRenderer = useMemo(
@@ -419,6 +611,7 @@ export function WalkthroughProvider({
         step={step}
         target={target}
         ready={ready}
+        collapsed={scrolling}
         theme={stepTheme}
         insets={insets}
         renderTooltip={renderTooltip}
@@ -430,7 +623,14 @@ export function WalkthroughProvider({
           isLast: index === tour.steps.length - 1,
           labels,
           muted,
-          hasAudio: step.audio != null && !!audio,
+          // Whether this step would make a sound if unmuted — drives the mute button.
+          hasAudio:
+            planNarration(step, {
+              mode: narration,
+              muted: false,
+              hasAudioAdapter: !!audio,
+              hasSpeechAdapter: !!speech,
+            }).primary !== null,
           next,
           back,
           skip,
