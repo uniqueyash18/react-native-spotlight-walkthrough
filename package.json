@@ -16,6 +16,7 @@
     "text-to-speech",
     "narration"
   ],
+  "author": "Yash Chouhan (https://github.com/uniqueyash18)",
   "license": "MIT",
   "repository": {
     "type": "git",

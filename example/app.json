@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Spotlight Walkthrough",
+    "slug": "spotlight-walkthrough-example",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFF6F4"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.spotlightwalkthrough.example"
+    },
+    "android": {
+      "package": "dev.spotlightwalkthrough.example",
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": ["expo-audio"]
+  }
+}

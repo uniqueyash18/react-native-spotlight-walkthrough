@@ -1,5 +1,13 @@
 # react-native-spotlight-walkthrough
 
+[![CI](https://github.com/uniqueyash18/react-native-spotlight-walkthrough/actions/workflows/ci.yml/badge.svg)](https://github.com/uniqueyash18/react-native-spotlight-walkthrough/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/react-native-spotlight-walkthrough.svg)](https://www.npmjs.com/package/react-native-spotlight-walkthrough)
+[![license](https://img.shields.io/npm/l/react-native-spotlight-walkthrough.svg)](LICENSE)
+
+<a href="https://drive.google.com/file/d/1Xg0AcA29E3qsmsc1y3e0_k8JFU5aZnvq/view?usp=sharing"><img src="https://raw.githubusercontent.com/uniqueyash18/react-native-spotlight-walkthrough/main/docs/preview.png" alt="Spotlight walkthrough steps: a circle spotlight with a tapping hand, an interactive card, a tooltip with custom content, a chip scrolled into view sideways, and a card scrolled into view from below the fold" /></a>
+
+**[▶ Watch the demo video](https://drive.google.com/file/d/1Xg0AcA29E3qsmsc1y3e0_k8JFU5aZnvq/view?usp=sharing)**
+
 Interactive spotlight walkthroughs for React Native.
 
 - **Interactive steps.** The spotlight hole can pass touches through, so users try the real gesture instead of only reading about it. Your code moves the tour forward when they do.
@@ -388,6 +396,16 @@ To restructure the tooltip completely, pass `renderTooltip` on the provider (all
 The overlay still positions your tooltip and draws its arrow, using `tooltip.backgroundColor`. Set `tooltip.arrow.show: false` if your card looks different.
 
 Use `step.content` to add something inside the default tooltip. A mock of the sheet the user will see next works well here, and it can run its own simulation.
+
+## Example app
+
+[`example/`](example) is a small parts-shop screen that uses every feature: shapes, simulations, an interactive step, custom tooltip content, scrolling (vertical, sideways and below the fold), and narration with a mode switcher. It runs against the library's source, so your edits show up straight away.
+
+```sh
+cd example
+npm install
+npm run ios        # or: npm run android
+```
 
 ## API
 
