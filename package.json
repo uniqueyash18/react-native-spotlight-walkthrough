@@ -1,6 +1,6 @@
 {
   "name": "react-native-spotlight-walkthrough",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Interactive spotlight walkthroughs for React Native: pass-through targets, animated gesture simulations, audio/TTS narration, show-once persistence and a fully themeable UI.",
   "keywords": [
     "react-native",

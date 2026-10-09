@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1
 
 - Docs: Expo vs bare React Native support, bare setup (Babel plugin, Xcode 27 Podfile fix), and narration adapters built on `react-native-sound` and `react-native-tts`.
 
