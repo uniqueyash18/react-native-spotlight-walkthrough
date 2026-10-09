@@ -27,6 +27,95 @@ npm install react-native-reanimated react-native-svg react-native-safe-area-cont
 npx expo install expo-audio expo-speech
 ```
 
+## Expo or bare React Native
+
+The core needs only `react-native-reanimated`, `react-native-svg` and `react-native-safe-area-context`, so it works with or without Expo. Only the two optional narration adapters (`/expo-audio`, `/expo-speech`) are Expo modules.
+
+| | Expo (dev build) | Expo Go | Bare React Native |
+| --- | --- | --- | --- |
+| Spotlight, tooltips, simulations, scrolling, show-once | ✅ | ✅ | ✅ |
+| Narration through the bundled Expo adapters | ✅ | ✅ | With `npx install-expo-modules`, or use your own adapters (below) |
+
+Tested on iOS with an Expo SDK 57 development build (React Native 0.86) and with bare React Native 0.87.
+
+### Bare React Native setup
+
+```sh
+npm install react-native-spotlight-walkthrough \
+  react-native-reanimated react-native-worklets react-native-svg react-native-safe-area-context
+cd ios && pod install
+```
+
+Add the worklets Babel plugin. It must be the last plugin in the list:
+
+```js
+// babel.config.js
+module.exports = {
+  presets: ['module:@react-native/babel-preset'],
+  plugins: ['react-native-worklets/plugin'], // Reanimated 3: 'react-native-reanimated/plugin'
+};
+```
+
+**Xcode 27.** Xcode 27 rejects any pod that targets an iOS version below 15. `react-native-svg`'s filters target still declares 12.4, so the build fails with *"IPHONEOS_DEPLOYMENT_TARGET is set to 12.4"*. Raise every pod in the Podfile's `post_install`, then run `pod install` again. Expo apps already do this.
+
+```ruby
+post_install do |installer|
+  react_native_post_install(installer, config[:reactNativePath], :mac_catalyst_enabled => false)
+
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |build_config|
+      if build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 15.1
+        build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+      end
+    end
+  end
+end
+```
+
+### Narration without Expo
+
+Plug any player and TTS engine into the two adapter interfaces. These were tested with `react-native-sound` and `react-native-tts`:
+
+```tsx
+import Sound from 'react-native-sound';
+import Tts from 'react-native-tts';
+import type { WalkthroughAudioAdapter, WalkthroughSpeechAdapter } from 'react-native-spotlight-walkthrough';
+
+Sound.setCategory('Playback');
+let current: Sound | null = null;
+
+export const audio: WalkthroughAudioAdapter = {
+  // Resolve once playback starts; reject if it can't load, so 'auto' falls back to TTS.
+  play: (source) =>
+    new Promise<void>((resolve, reject) => {
+      current?.stop();
+      current?.release();
+      const onLoad = (error: unknown) => {
+        if (error) return reject(error);
+        sound.play();
+        resolve();
+      };
+      const sound =
+        typeof source === 'string' ? new Sound(source, '', onLoad) : new Sound(source as number, onLoad);
+      current = sound;
+    }),
+  stop: () => current?.stop(),
+};
+
+export const speech: WalkthroughSpeechAdapter = {
+  speak: (text, { language } = {}) => {
+    Tts.stop();
+    if (language) Tts.setDefaultLanguage(language).catch(() => {});
+    Tts.speak(text);
+  },
+  stop: () => Tts.stop(),
+};
+
+<WalkthroughProvider audio={audio} speech={speech} speechLanguage="en-US">
+```
+
+`react-native-sound` plays files packaged inside the app. On iOS it can't play from a URL, and that includes `require()`d assets in a **debug** build, because those are served from Metro over HTTP. In `auto` mode those steps fall back to TTS, which is fine. For remote voice-overs, use `react-native-track-player` or `react-native-video` in the audio adapter instead.
+
 ## Quick start
 
 Wrap your app once, inside `SafeAreaProvider`:
