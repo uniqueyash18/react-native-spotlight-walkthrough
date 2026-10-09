@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/react-native-spotlight-walkthrough.svg)](https://www.npmjs.com/package/react-native-spotlight-walkthrough)
 [![license](https://img.shields.io/npm/l/react-native-spotlight-walkthrough.svg)](LICENSE)
 
-<a href="https://drive.google.com/file/d/1Xg0AcA29E3qsmsc1y3e0_k8JFU5aZnvq/view?usp=sharing"><img src="https://raw.githubusercontent.com/uniqueyash18/react-native-spotlight-walkthrough/main/docs/preview.png" alt="Spotlight walkthrough steps: a circle spotlight with a tapping hand, an interactive card, a tooltip with custom content, a chip scrolled into view sideways, and a card scrolled into view from below the fold" /></a>
+<a href="https://drive.google.com/file/d/1Xg0AcA29E3qsmsc1y3e0_k8JFU5aZnvq/view?usp=sharing"><img src="docs/preview.png" alt="Spotlight walkthrough steps: a circle spotlight with a tapping hand, an interactive card, a tooltip with custom content, a chip scrolled into view sideways, and a card scrolled into view from below the fold" /></a>
 
 **[▶ Watch the demo video](https://drive.google.com/file/d/1Xg0AcA29E3qsmsc1y3e0_k8JFU5aZnvq/view?usp=sharing)**
 
