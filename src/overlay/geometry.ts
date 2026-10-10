@@ -229,3 +229,11 @@ export function computeScrollOffset(input: ScrollAxisInput): number | null {
   const next = clamp(offset + (newVisStart - visStart), 0, maxOffset);
   return Math.abs(next - offset) > 1 ? next : null;
 }
+
+/** Max finger travel, in points, for a touch to still count as a tap. */
+export const TAP_SLOP = 10;
+
+/** True if a touch released at `end` after starting at `start` was a tap rather than a drag. */
+export function isTap(start: Point, end: Point, slop = TAP_SLOP): boolean {
+  return Math.hypot(end.x - start.x, end.y - start.y) <= slop;
+}

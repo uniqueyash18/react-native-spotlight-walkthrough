@@ -12,6 +12,7 @@ export interface ExpoAudioAdapterOptions {
    * often never report an error. Default 5000 ms.
    */
   startTimeoutMs?: number;
+  /** Audio-session / player errors. A clip that fails to play rejects `play` instead (see the provider's `onAudioError`). */
   onError?: (error: unknown) => void;
 }
 
@@ -52,8 +53,9 @@ export function createExpoAudioAdapter(
     return player;
   };
 
+  // Playback failures are reported by rejecting `play` — the provider turns
+  // that into `onAudioError` (and the TTS fallback), so don't also call `onError`.
   const fail = (error: unknown) => {
-    onError?.(error);
     throw error;
   };
 

@@ -156,6 +156,8 @@ export function WalkthroughProvider({
   const [ready, setReady] = useState(false);
   const [scrolling, setScrolling] = useState(false);
   const [measureTick, setMeasureTick] = useState(0);
+  // Bumped on every start so restarting the active tour at the same step still re-measures.
+  const [startId, setStartId] = useState(0);
   const [lastFinishReason, setLastFinishReason] = useState<FinishReason | null>(null);
 
   const targets = useRef(
@@ -289,8 +291,15 @@ export function WalkthroughProvider({
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
+  const startTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const finish = useCallback(
     (reason: FinishReason) => {
+      // A pending delayed start must not pop a tour up after stop / skip.
+      if (startTimer.current) {
+        clearTimeout(startTimer.current);
+        startTimer.current = null;
+      }
       const current = stateRef.current;
       if (!current.tour) return;
       const { tour: finished, index: at } = current;
@@ -306,12 +315,18 @@ export function WalkthroughProvider({
     [markSeen, stopAudio],
   );
 
-  const startTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Each start() call takes a ticket; a call that was overtaken while awaiting
+  // storage gives up, so two quick calls can't both begin the tour.
+  const startTicket = useRef(0);
 
   const start = useCallback(
     async (newTour: WalkthroughTour, options: StartOptions = {}) => {
       if (newTour.steps.length === 0) return false;
-      if (newTour.showOnce && !options.force && (await hasSeen(newTour.id))) return false;
+      const ticket = ++startTicket.current;
+      if (newTour.showOnce && !options.force) {
+        const seen = await hasSeen(newTour.id);
+        if (seen || ticket !== startTicket.current) return false;
+      }
 
       if (stateRef.current.tour) finish('stopped');
       const startIndex =
@@ -321,6 +336,7 @@ export function WalkthroughProvider({
         setReady(false);
         setTarget(null);
         setLastFinishReason(null);
+        setStartId((n) => n + 1);
         dispatch({ type: 'start', tour: newTour, index: startIndex });
         latest.current.onStart?.(newTour.id);
       };
@@ -387,7 +403,7 @@ export function WalkthroughProvider({
 
   // ── Per-step: onBeforeEnter → measure → onEnter + audio ────────────────────
 
-  const stepKey = tour ? `${tour.id}:${index}:${step?.id}` : null;
+  const stepKey = tour ? `${tour.id}:${startId}:${index}:${step?.id}` : null;
   const measuredStepKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -506,9 +522,11 @@ export function WalkthroughProvider({
         setReady(true);
         if (isRefresh) return;
         measuredStepKey.current = stepKey;
-        step.onEnter?.();
-        latest.current.onStepChange?.(step, index, tour.id);
-        narrate(step);
+        // Read the step afresh: updateStep may have patched it while measuring.
+        const liveStep = stateRef.current.tour?.steps[index] ?? step;
+        liveStep.onEnter?.();
+        latest.current.onStepChange?.(liveStep, index, tour.id);
+        narrate(liveStep);
       };
       void attempt();
     };
@@ -524,11 +542,14 @@ export function WalkthroughProvider({
       measuring.current = false;
       setScrolling(false);
       if (retryTimer) clearTimeout(retryTimer);
-      if (!isRefresh) stopAudio();
     };
     // Re-run on a new step or an explicit refresh — not when `step` is merely patched by updateStep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepKey, measureTick]);
+
+  // Narration belongs to a step, not to a measurement: stop it when the step
+  // changes or the tour ends, but not when the target is merely re-measured.
+  useEffect(() => () => stopAudio(), [stepKey, stopAudio]);
 
   // Rotation / window resize → re-measure.
   useEffect(() => {

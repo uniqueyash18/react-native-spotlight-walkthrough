@@ -100,3 +100,9 @@ test('overlay path has an outer rect and a hole subpath', () => {
   assert.equal((d.match(/M/g) ?? []).length, 2);
   assert.equal(overlayPath(400, 800, 0, 0, 0, 0, 0), 'M0,0H400V800H0Z');
 });
+
+test('isTap tells taps from drags', async () => {
+  const { isTap } = await import('../src/overlay/geometry.ts');
+  assert.equal(isTap({ x: 0, y: 0 }, { x: 3, y: 4 }), true);
+  assert.equal(isTap({ x: 0, y: 0 }, { x: 40, y: 0 }), false);
+});

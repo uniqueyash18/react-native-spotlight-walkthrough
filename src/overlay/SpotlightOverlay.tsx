@@ -28,6 +28,7 @@ import {
   computeBlockers,
   computeHole,
   computeTooltipPosition,
+  isTap,
   overlayPath,
   roundedRectPath,
   type Hole,
@@ -75,6 +76,7 @@ export function SpotlightOverlay({
 }: SpotlightOverlayProps) {
   const rootRef = useRef<View>(null);
   const [frame, setFrame] = useState<Frame | null>(null);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -237,7 +239,16 @@ export function SpotlightOverlay({
                   key={i}
                   style={[styles.abs, { left: b.x, top: b.y, width: b.width, height: b.height }]}
                   onStartShouldSetResponder={() => true}
-                  onResponderRelease={() => onBackdropAction(backdropPress)}
+                  onResponderGrant={(e) => {
+                    touchStart.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+                  }}
+                  onResponderRelease={(e) => {
+                    const start = touchStart.current;
+                    touchStart.current = null;
+                    // A swipe across the backdrop isn't a press.
+                    if (start && !isTap(start, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })) return;
+                    onBackdropAction(backdropPress);
+                  }}
                 />
               ))}
 
